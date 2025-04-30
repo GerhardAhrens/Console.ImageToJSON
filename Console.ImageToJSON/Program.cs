@@ -16,10 +16,12 @@
 namespace Console.ImageToJSON
 {
     using System;
+    using System.Drawing;
     using System.IO;
     using System.Text.Json;
     using System.Text.Json.Serialization;
-    using Microsoft.VisualBasic;
+    using System.Windows.Controls;
+    using System.Xml.Linq;
 
     public class Program
     {
@@ -29,7 +31,7 @@ namespace Console.ImageToJSON
             {
                 Console.Clear();
                 Console.WriteLine("1. Image in JSON Datei schreiben/Lesen (über Base64)");
-                Console.WriteLine("2. Menüpunkt 2");
+                Console.WriteLine("2. Image in JSON Datei mit JsonConverter");
                 Console.WriteLine("X. Beenden");
 
                 Console.WriteLine("Wählen Sie einen Menüpunkt oder 'x' für beenden");
@@ -56,7 +58,6 @@ namespace Console.ImageToJSON
         private static void MenuPoint1()
         {
             Console.Clear();
-            Base64 base64String = string.Empty;
 
             string currentDirectory = AppDomain.CurrentDomain.BaseDirectory;
             string demoDataPath = Path.Combine(new DirectoryInfo(currentDirectory).Parent.Parent.Parent.FullName, "DemoData");
@@ -64,20 +65,22 @@ namespace Console.ImageToJSON
 
             if (File.Exists(demoDataImage))
             {
-                base64String = ImageToBase64(demoDataImage);
+                Base64 base64String = ImageToBase64(demoDataImage);
 
-                Contact contact = new Contact("Gerhard",base64String.Value);
+                Contact contact = new Contact("Gerhard","Ahrens",base64String.Value);
+
                 string jsonString = JsonSerializer.Serialize<Contact>(contact);
+
                 File.WriteAllText($"{demoDataPath}\\Demo.json", jsonString);
                 Console.WriteLine("JSON Datei geschrieben!");
             }
 
             if (File.Exists($"{demoDataPath}\\Demo.json"))
             {
-                Console.WriteLine("JSON Datei gelesen!");
+                Console.WriteLine("JSON Datei lesen!");
                 string jsonString = File.ReadAllText($"{demoDataPath}\\Demo.json");
                 Contact contact = JsonSerializer.Deserialize<Contact>(jsonString);
-                System.Drawing.Image photo = Base64ToImage(contact.Photo);
+                System.Drawing.Image photo = Base64ToImage(contact.PhotoBase64);
                 photo.Save($"{demoDataPath}\\DemoSave.png", System.Drawing.Imaging.ImageFormat.Png);
                 Console.WriteLine($"Image-Datei aus Base64 gelesen und unter {demoDataPath}\\DemoSave.png gespeichert");
             }
@@ -90,10 +93,35 @@ namespace Console.ImageToJSON
         {
             Console.Clear();
 
+            string currentDirectory = AppDomain.CurrentDomain.BaseDirectory;
+            string demoDataPath = Path.Combine(new DirectoryInfo(currentDirectory).Parent.Parent.Parent.FullName, "DemoData");
+            string demoDataImage = Path.Combine(new DirectoryInfo(currentDirectory).Parent.Parent.Parent.FullName, "DemoData", "Demo.png");
+
+            if (File.Exists(demoDataImage))
+            {
+                ContactConv contact = new ContactConv("Gerhard", "Ahrens");
+                contact.PhotoPath = demoDataImage;
+
+                string jsonString = JsonSerializer.Serialize<ContactConv>(contact);
+                File.WriteAllText($"{demoDataPath}\\DemoConv.json", jsonString);
+                Console.WriteLine("JSON Datei geschrieben!");
+            }
+
+            if (File.Exists($"{demoDataPath}\\DemoConv.json"))
+            {
+                Console.WriteLine("JSON Datei lesen!");
+                string jsonString = File.ReadAllText($"{demoDataPath}\\DemoConv.json");
+                ContactConv contact = JsonSerializer.Deserialize<ContactConv>(jsonString);
+                System.Drawing.Image photo = Base64ToImage(contact.PhotoBase64);
+                photo.Save($"{demoDataPath}\\DemoSave.png", System.Drawing.Imaging.ImageFormat.Png);
+                Console.WriteLine($"Image-Datei aus Base64 gelesen und unter {demoDataPath}\\DemoSave.png gespeichert");
+            }
+
             Console.WriteLine("Mit einer belibigen Taste zurück zum Menü!");
             Console.ReadKey();
         }
 
+        #region Image Hilfsmethoden
         public static Base64 ImageToBase64(string imageFile)
         {
             System.Drawing.Image img = System.Drawing.Image.FromFile(imageFile);
@@ -123,21 +151,102 @@ namespace Console.ImageToJSON
 
             return result;
         }
+        #endregion Image Hilfsmethoden
     }
 
     [Serializable]
     public class Contact
     {
-        public Contact(string fullname, string photo)
+        public Contact(string firstName, string lastName, string photoBase64 = "")
         {
-            this.Fullname = fullname;
-            this.Photo = photo;
+            this.Firstname = firstName;
+            this.Lastname = lastName;
+            this.PhotoBase64 = photoBase64;
         }
 
-        public string Fullname { get; set; }
+        public string Firstname { get; set; }
 
-        public string Photo { get; set; }
+        public string Lastname { get; set; }
+
+        public string PhotoBase64 { get; set; }
     }
+
+    [Serializable]
+    [JsonConverter(typeof(ContactJsonConverter))]
+    public class ContactConv
+    {
+        public ContactConv(string firstName, string lastName, string photoBase64 = "")
+        {
+            this.Firstname = firstName;
+            this.Lastname = lastName;
+            this.PhotoBase64 = photoBase64;
+        }
+
+        public string Firstname { get; set; }
+
+        public string Lastname { get; set; }
+
+        public string PhotoPath { get; set; }
+
+        public string PhotoBase64 { get; set; }
+    }
+
+    #region JsonConverter
+    public class ContactJsonConverter : JsonConverter<ContactConv>
+    {
+        public override ContactConv Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        {
+            if (reader.TokenType == JsonTokenType.Null)
+            {
+                return null;
+            }
+
+            string firstName = string.Empty;
+            string lastName = string.Empty;
+            string photoPath = string.Empty;
+            string photoBase64 = string.Empty;
+
+            using (var jsonDocument = JsonDocument.ParseValue(ref reader))
+            {
+                firstName = jsonDocument.RootElement.GetProperty("Firstname").GetString();
+                lastName = jsonDocument.RootElement.GetProperty("Lastname").GetString();
+                photoPath = jsonDocument.RootElement.GetProperty("PhotoPath").GetString();
+                photoBase64 = jsonDocument.RootElement.GetProperty("PhotoBase64").GetString();
+            }
+
+            ContactConv contact = new ContactConv(firstName, lastName, photoBase64);
+            contact.PhotoPath = photoPath;
+
+            return contact;
+        }
+
+        public override void Write(Utf8JsonWriter writer, ContactConv contact, JsonSerializerOptions options)
+        {
+            string fullName = $"{contact.Firstname} {contact.Lastname}";
+            string firstName = contact.Firstname;
+            string lastName = contact.Lastname;
+            string photoPath = contact.PhotoPath;
+            string photoBase64 = string.Empty;
+
+            if (File.Exists(contact.PhotoPath) == true)
+            {
+                System.Drawing.Image img = System.Drawing.Image.FromFile(contact.PhotoPath);
+                using (var ms = new MemoryStream())
+                {
+                    img.Save(ms, img.RawFormat);
+                    photoBase64 = Convert.ToBase64String(ms.ToArray());
+                }
+            }
+
+            writer.WriteStartObject();
+            writer.WriteString(nameof(contact.Firstname), firstName);
+            writer.WriteString(nameof(contact.Lastname), lastName);
+            writer.WriteString(nameof(contact.PhotoPath), photoPath);
+            writer.WriteString(nameof(contact.PhotoBase64), photoBase64);
+            writer.WriteEndObject();
+        }
+    }
+    #endregion JsonConverter
 
     #region Implementation of Type Base64
     public struct Base64 : IEquatable<Base64>, IComparable<Base64>
